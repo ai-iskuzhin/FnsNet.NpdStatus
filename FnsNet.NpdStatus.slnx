@@ -1,0 +1,8 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FnsNet.NpdStatus/FnsNet.NpdStatus.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FnsNet.NpdStatus.Tests/FnsNet.NpdStatus.Tests.csproj" />
+  </Folder>
+</Solution>

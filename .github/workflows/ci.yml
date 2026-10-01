@@ -1,0 +1,106 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+# Cancel superseded runs for the same ref (e.g. new pushes to a PR).
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Opt JS actions into Node 24 (Node 20 is deprecated on the runners).
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: 'true'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Restore
+        run: dotnet restore FnsNet.NpdStatus.slnx
+
+      - name: Build
+        run: dotnet build FnsNet.NpdStatus.slnx --configuration Release --no-restore
+
+      # Share the compiled output so test/pack skip recompilation. Jobs run on the
+      # same runner image and checkout path, so --no-build resolves correctly.
+      # (NuGet packages are not shared, so downstream jobs still run a quick restore.)
+      - name: Upload build output
+        uses: actions/upload-artifact@v5
+        with:
+          name: build-output
+          path: |
+            **/bin
+            **/obj
+          include-hidden-files: true
+          retention-days: 1
+
+  test:
+    name: Test
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download build output
+        uses: actions/download-artifact@v5
+        with:
+          name: build-output
+          path: .
+
+      - name: Restore
+        run: dotnet restore FnsNet.NpdStatus.slnx
+
+      - name: Test
+        run: dotnet test FnsNet.NpdStatus.slnx --configuration Release --no-build --verbosity normal
+
+  pack:
+    name: Pack
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 10.0.x
+
+      - name: Download build output
+        uses: actions/download-artifact@v5
+        with:
+          name: build-output
+          path: .
+
+      - name: Restore
+        run: dotnet restore src/FnsNet.NpdStatus/FnsNet.NpdStatus.csproj
+
+      - name: Pack
+        run: dotnet pack src/FnsNet.NpdStatus/FnsNet.NpdStatus.csproj --configuration Release --no-build --output artifacts/packages
+
+      - name: Upload packages
+        uses: actions/upload-artifact@v5
+        with:
+          name: packages
+          path: artifacts/packages/*
