@@ -22,17 +22,20 @@ public sealed class NpdStatusException : Exception
     /// <param name="statusCode">The HTTP status the service returned.</param>
     /// <param name="code">The service's error code, when it sent one.</param>
     /// <param name="serviceMessage">The service's own message, when it sent one.</param>
+    /// <param name="responseBody">The response body as it arrived.</param>
     /// <param name="innerException">The underlying failure, when there was one.</param>
     public NpdStatusException(
         HttpStatusCode statusCode,
         string? code,
         string? serviceMessage,
+        string? responseBody = null,
         Exception? innerException = null)
         : base(BuildMessage(statusCode, code, serviceMessage), innerException)
     {
         StatusCode = statusCode;
         Code = code;
         ServiceMessage = serviceMessage;
+        ResponseBody = responseBody;
     }
 
     /// <summary>The HTTP status: 422 for a business error, 400 for a malformed body, 500 inside.</summary>
@@ -45,6 +48,16 @@ public sealed class NpdStatusException : Exception
 
     /// <summary>The service's own message, in Russian. Shown to a person, not matched on.</summary>
     public string? ServiceMessage { get; }
+
+    /// <summary>
+    /// The response body as it arrived, kept whatever the status.
+    /// </summary>
+    /// <remarks>
+    /// Always captured, unlike the body of a successful answer: an error is rare, small, and the one
+    /// case where <see cref="Code" /> alone is not enough — an unfamiliar code or a 400 with no code
+    /// at all leaves nothing else to put in a support ticket.
+    /// </remarks>
+    public string? ResponseBody { get; }
 
     /// <summary>Whether trying again later could plausibly give a different answer.</summary>
     public bool IsTransient =>

@@ -48,7 +48,8 @@ internal sealed class StubHandler : HttpMessageHandler
     public static (NpdStatusClient Client, StubHandler Handler) Create(
         HttpStatusCode statusCode,
         string body,
-        string contentType = "application/json")
+        string contentType = "application/json",
+        NpdStatusOptions? options = null)
     {
         var handler = new StubHandler(statusCode, body, contentType);
         var httpClient = new HttpClient(handler)
@@ -56,6 +57,8 @@ internal sealed class StubHandler : HttpMessageHandler
             BaseAddress = new Uri("https://statusnpd.nalog.ru/"),
         };
 
-        return (new NpdStatusClient(httpClient), handler);
+        return options is null
+            ? (new NpdStatusClient(httpClient), handler)
+            : (new NpdStatusClient(httpClient, Microsoft.Extensions.Options.Options.Create(options)), handler);
     }
 }

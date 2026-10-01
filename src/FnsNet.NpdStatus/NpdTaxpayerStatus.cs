@@ -13,6 +13,11 @@ namespace FnsNet.NpdStatus;
 /// <param name="Message">
 /// The service's own sentence, in Russian, suitable for showing to a person.
 /// </param>
+/// <param name="RawResponseBody">
+/// The response body as it arrived, or <c>null</c> unless
+/// <see cref="NpdStatusOptions.CaptureRawResponseBody" /> is on. Holds the ИНН, so it is personal
+/// data: useful while debugging, not something to log in the open.
+/// </param>
 /// <remarks>
 /// The answer is about a <em>date</em>, not a standing fact: registration can end at any time, so a
 /// result is only ever true of the day it was asked about. Store the date beside the answer.
@@ -21,7 +26,8 @@ public sealed record NpdTaxpayerStatus(
     string Inn,
     DateOnly Date,
     bool IsRegistered,
-    string? Message);
+    string? Message,
+    string? RawResponseBody = null);
 
 /// <summary>The request body, exactly as the service expects it.</summary>
 internal sealed record NpdStatusRequestBody

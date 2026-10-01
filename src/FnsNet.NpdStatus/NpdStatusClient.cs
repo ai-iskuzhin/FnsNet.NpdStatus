@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
+using Microsoft.Extensions.Options;
 using System.Text.Json;
 
 namespace FnsNet.NpdStatus;
@@ -14,22 +15,35 @@ public sealed class NpdStatusClient : INpdStatusClient, IDisposable
 
     private readonly HttpClient _httpClient;
     private readonly bool _ownsHttpClient;
+    private readonly NpdStatusOptions _options;
 
     /// <summary>Creates the client over a configured <see cref="HttpClient" />.</summary>
     /// <param name="httpClient">
     /// Supplies the base address and the timeout; register it through
     /// <see cref="ServiceCollectionExtensions.AddNpdStatusClient" />.
     /// </param>
-    public NpdStatusClient(HttpClient httpClient)
-        : this(httpClient, ownsHttpClient: false)
+    /// <param name="options">
+    /// Settings the transport does not carry — currently only whether to keep the raw response body.
+    /// Resolved from the container when registered through
+    /// <see cref="ServiceCollectionExtensions.AddNpdStatusClient" />; omit it to take the defaults.
+    /// </param>
+    /// <remarks>
+    /// One constructor, with the second parameter optional, rather than two overloads: the typed
+    /// client activator refuses a type whose constructors it cannot choose between, so a second
+    /// overload would break <c>AddHttpClient&lt;INpdStatusClient, NpdStatusClient&gt;</c> at the
+    /// first resolve rather than at compile time.
+    /// </remarks>
+    public NpdStatusClient(HttpClient httpClient, IOptions<NpdStatusOptions>? options = null)
+        : this(httpClient, options?.Value, ownsHttpClient: false)
     {
     }
 
-    private NpdStatusClient(HttpClient httpClient, bool ownsHttpClient)
+    private NpdStatusClient(HttpClient httpClient, NpdStatusOptions? options, bool ownsHttpClient)
     {
         ArgumentNullException.ThrowIfNull(httpClient);
 
         _httpClient = httpClient;
+        _options = options ?? new NpdStatusOptions();
         _ownsHttpClient = ownsHttpClient;
     }
 
@@ -68,6 +82,7 @@ public sealed class NpdStatusClient : INpdStatusClient, IDisposable
                 BaseAddress = settings.BaseAddress,
                 Timeout = settings.Timeout,
             },
+            settings,
             ownsHttpClient: true);
     }
 
@@ -94,16 +109,41 @@ public sealed class NpdStatusClient : INpdStatusClient, IDisposable
             throw await BuildErrorAsync(response, cancellationToken).ConfigureAwait(false);
         }
 
-        var payload = await response.Content
-            .ReadFromJsonAsync<NpdStatusResponseBody>(SerializerOptions, cancellationToken)
-            .ConfigureAwait(false);
+        // Read as text rather than straight into the model: the same string is what gets kept when
+        // capture is on, and parsing from it costs nothing on a body this size.
+        var raw = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+        NpdStatusResponseBody? payload;
+
+        try
+        {
+            payload = JsonSerializer.Deserialize<NpdStatusResponseBody>(raw, SerializerOptions);
+        }
+        catch (JsonException exception)
+        {
+            throw new NpdStatusException(
+                response.StatusCode,
+                null,
+                "The service returned a body that is not JSON.",
+                raw,
+                exception);
+        }
 
         if (payload is null)
         {
-            throw new NpdStatusException(response.StatusCode, null, "The service returned an empty body.");
+            throw new NpdStatusException(
+                response.StatusCode,
+                null,
+                "The service returned an empty body.",
+                raw);
         }
 
-        return new NpdTaxpayerStatus(body.Inn, date, payload.Status, payload.Message);
+        return new NpdTaxpayerStatus(
+            body.Inn,
+            date,
+            payload.Status,
+            payload.Message,
+            _options.CaptureRawResponseBody ? raw : null);
     }
 
     /// <summary>
@@ -118,24 +158,28 @@ public sealed class NpdStatusClient : INpdStatusClient, IDisposable
         HttpResponseMessage response,
         CancellationToken cancellationToken)
     {
+        var raw = await ReadRawAsync(response, cancellationToken).ConfigureAwait(false);
+
         string? code = null;
         string? message = null;
 
         try
         {
-            var error = await response.Content
-                .ReadFromJsonAsync<NpdStatusErrorBody>(SerializerOptions, cancellationToken)
-                .ConfigureAwait(false);
+            var error = string.IsNullOrWhiteSpace(raw)
+                ? null
+                : JsonSerializer.Deserialize<NpdStatusErrorBody>(raw, SerializerOptions);
 
             code = error?.Code;
             message = error?.Message;
         }
-        catch (Exception exception) when (exception is JsonException or NotSupportedException)
+        catch (JsonException)
         {
-            message = await ReadRawAsync(response, cancellationToken).ConfigureAwait(false);
+            // A 400 arrives when the request body did not parse, and its own body is plain text.
+            // Keeping the text as the message is more use than reporting that it was not JSON.
+            message = raw;
         }
 
-        return new NpdStatusException(response.StatusCode, code, message);
+        return new NpdStatusException(response.StatusCode, code, message, raw);
     }
 
     private static async Task<string?> ReadRawAsync(

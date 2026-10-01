@@ -99,6 +99,49 @@ var status = await client.GetStatusAsync("525741209968", new DateOnly(2026, 10, 
 
 Ошибка не значит «не самозанятый»: неудачная проверка оставляет статус неизвестным.
 
+## Отладка
+
+Трассировка и логирование запросов работают средствами платформы — SDK для этого ничего не делает.
+
+```csharp
+// Запрос попадает в трассировку как обычный HTTP-вызов.
+services.AddOpenTelemetry().WithTracing(t => t.AddHttpClientInstrumentation());
+```
+
+```json
+// Логи именно этого клиента: заголовки и тайминги. Тела запросов и ответов сюда не попадают.
+"Logging": {
+  "LogLevel": {
+    "System.Net.Http.HttpClient.FnsNet.NpdStatus.LogicalHandler": "Trace",
+    "System.Net.Http.HttpClient.FnsNet.NpdStatus.ClientHandler": "Trace"
+  }
+}
+```
+
+Имя клиента — `ServiceCollectionExtensions.HttpClientName`.
+
+### Сырое тело ответа
+
+Тело ответа с ошибкой есть всегда:
+
+```csharp
+catch (NpdStatusException exception)
+{
+    logger.LogWarning(
+        "ФНС ответила {Status} {Code}: {Body}",
+        (int)exception.StatusCode, exception.Code, exception.ResponseBody);
+}
+```
+
+Тело успешного ответа — по флагу, по умолчанию выключено: в нём ИНН, то есть персональные данные.
+
+```csharp
+services.AddNpdStatusClient(o => o.CaptureRawResponseBody = true);
+
+var status = await fns.GetStatusAsync(inn, date, ct);
+// status.RawResponseBody
+```
+
 ## Источник
 
 [Описание API публичного сервиса ФНС России «Проверка статуса налогоплательщика налога на
